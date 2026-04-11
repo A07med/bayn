@@ -168,8 +168,8 @@ export async function applyMatchSkipCountdownSubtractIfCurrent(matchId, question
 }
 
 /**
- * Player skip: add time penalty for one team only (does not change shared question_ends_at).
- * Admin skip still uses {@link applyMatchSkipCountdownSubtractIfCurrent}.
+ * Player skip: only the clicking team’s timer is penalized (their cumulative `teamSkipPenaltySec[teamId]`).
+ * Does not mutate shared `question_ends_at`. Admin skip uses {@link applyMatchSkipCountdownSubtractIfCurrent}.
  */
 export async function applyPlayerTeamSkipPenaltyIfCurrent(matchId, teamId, questionIndex, subtractSeconds) {
   const match = await getMatch(matchId);

@@ -107,7 +107,12 @@ export function getCountdownRemainingSec(match, nowMs = Date.now()) {
   return Math.max(0, (endMs - nowMs) / 1000);
 }
 
-/** Cumulative seconds “taxed” from this team’s view of the clock (player skips only). */
+/**
+ * Per-team timer adjustment (player skips only). Persisted as `match.teamSkipPenaltySec` in DB.
+ * Conceptually: `teamTimers[teamId].effectiveDurationSec -= penaltySec` vs the shared baseline —
+ * we store cumulative penalty seconds so remainingForTeam = sharedRemaining − penalty.
+ * Shared `question_ends_at` is never mutated by player skip (admin skip still updates it globally).
+ */
 export function getTeamSkipPenaltySec(match, teamId) {
   if (!teamId || !match?.teamSkipPenaltySec || typeof match.teamSkipPenaltySec !== 'object') return 0;
   const key = String(teamId);
@@ -116,7 +121,7 @@ export function getTeamSkipPenaltySec(match, teamId) {
   return Math.max(0, Number(v) || 0);
 }
 
-/** Same wall-clock budget as {@link getCountdownRemainingSec}, minus this team’s skip penalties. */
+/** Remaining time for this team’s display only; other teams use their own penalty map entries. */
 export function getCountdownRemainingSecForTeam(match, teamId, nowMs = Date.now()) {
   const base = getCountdownRemainingSec(match, nowMs);
   return Math.max(0, base - getTeamSkipPenaltySec(match, teamId));

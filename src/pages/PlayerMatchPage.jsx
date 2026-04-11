@@ -11,7 +11,8 @@ import {
 import { formatTime, getCountdownRemainingSec, getCountdownRemainingSecForTeam, wallElapsedSec } from '../utils';
 import { Trophy, Clock, Zap, Users, CheckCircle2, XCircle, SkipForward } from 'lucide-react';
 
-const AUTO_ADVANCE_MS = 500;
+/** Delay before advancing after answer/skip */
+const AUTO_ADVANCE_MS = 150;
 /** Seconds removed from countdown on skip (same magnitude as admin Skip) */
 const SKIP_SUBTRACT_SEC = 10;
 
@@ -200,21 +201,19 @@ export default function PlayerMatchPage() {
         setPickedChoice(null);
         return;
       }
-      try {
-        await incrementMatchTeamSkip(matchId, teamPick.teamId, 1);
-        setSkippedCount((s) => s + 1);
-      } catch (err) {
-        console.error('Skip stat failed', err);
-      }
       setCountdownTick((t) => t + 1);
+      setSkippedCount((s) => s + 1);
+      scheduleQuestionAdvance(qIndex);
+      void incrementMatchTeamSkip(matchId, teamPick.teamId, 1).catch((err) => {
+        console.error('Skip stat failed', err);
+        setSkippedCount((s) => Math.max(0, s - 1));
+      });
     } catch (e) {
       console.error('Skip countdown update failed', e);
       choiceLockedRef.current = false;
       setPickedChoice(null);
       return;
     }
-
-    scheduleQuestionAdvance(qIndex);
   }
 
   if (match === undefined) {
