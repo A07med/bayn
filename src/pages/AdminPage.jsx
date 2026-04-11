@@ -7,7 +7,7 @@ import {
   subscribeAllMatchTeamResults,
   clearMatchTeamResultsForMatches,
 } from '../services/supabaseService';
-import { distributeQuestions, enrichQuestionWithMcq, withBase } from '../utils';
+import { shuffleArray, enrichQuestionWithMcq, withBase } from '../utils';
 import { isSupabaseConfigured } from '../supabase';
 import { Plus, Trash2, Upload, RefreshCw, Users, Swords, HelpCircle, Play, AlertTriangle } from 'lucide-react';
 
@@ -198,13 +198,13 @@ export default function AdminPage() {
     if (questions.length === 0) return alert('No questions loaded');
     if (matches.length === 0) return alert('No matches created');
 
-    const answerPool = questions.map((q) => q.answer);
-    const enriched = questions.map((q) => enrichQuestionWithMcq(q, answerPool));
-    const groups = distributeQuestions(enriched, matches.length);
-    for (let i = 0; i < matches.length; i++) {
-      await updateMatch(matches[i].id, { questions: groups[i], currentQuestion: 0 });
+    const shuffled = shuffleArray(questions);
+    const answerPool = shuffled.map((q) => q.answer);
+    const enriched = shuffled.map((q) => enrichQuestionWithMcq(q, answerPool));
+    for (const m of matches) {
+      await updateMatch(m.id, { questions: enriched, currentQuestion: 0 });
     }
-    alert(`Distributed ${questions.length} questions across ${matches.length} matches`);
+    alert(`Copied all ${questions.length} questions to every match (${matches.length} matches)`);
     await loadData();
   }
 
@@ -561,9 +561,8 @@ export default function AdminPage() {
             </p>
             <div className="text-sm text-amber-200/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 mb-3">
               <strong className="text-amber-100">Players use each match’s copied questions,</strong> not this list directly. After you load or
-              upload JSON, click <strong>Shuffle &amp; Distribute to Matches</strong> so every match gets the latest texts (including{' '}
-              <code className="text-amber-50">choices</code> / <code className="text-amber-50">correctIndex</code>). Otherwise screens keep the old
-              snapshot from the last distribute.
+              upload JSON, click <strong>Apply bank to all matches</strong> to copy the <em>full</em> question bank (MCQ-enriched) to{' '}
+              <em>every</em> match. Otherwise screens keep the old snapshot from the last apply.
             </div>
             <div className="flex flex-wrap gap-3">
               <label className="bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer flex items-center gap-1">
@@ -579,7 +578,7 @@ export default function AdminPage() {
                     await saveQuestions(data);
                     setQuestions(data);
                     alert(
-                      'Sample bank loaded into Supabase. Click “Shuffle & Distribute to Matches” so player/admin match views use the new MCQs.'
+                      'Sample bank loaded into Supabase. Click “Apply bank to all matches” so every match gets the full MCQ set.'
                     );
                   } catch (e) {
                     console.error(e);
@@ -594,7 +593,7 @@ export default function AdminPage() {
                 onClick={handleDistributeQuestions}
                 className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
               >
-                <RefreshCw size={16} /> Shuffle & Distribute to Matches
+                <RefreshCw size={16} /> Apply bank to all matches
               </button>
             </div>
           </div>

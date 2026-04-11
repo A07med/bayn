@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import {
   subscribeMatch,
   updateMatch,
@@ -27,7 +27,8 @@ const skipSound = typeof Audio !== 'undefined' ? new Audio('data:audio/wav;base6
 
 export default function MatchPage() {
   const { matchId } = useParams();
-  const [match, setMatch] = useState(null);
+  /** undefined = loading; null = not found / error */
+  const [match, setMatch] = useState(undefined);
   const [currentQ, setCurrentQ] = useState(0);
   const [matchStatus, setMatchStatus] = useState('pending');
   const [showAnswer, setShowAnswer] = useState(false);
@@ -40,10 +41,17 @@ export default function MatchPage() {
   matchRef.current = match;
 
   useEffect(() => {
+    setMatch(undefined);
+    if (!matchId) {
+      setMatch(null);
+      return undefined;
+    }
     const unsub = subscribeMatch(matchId, (data) => {
       setMatch(data);
-      setCurrentQ(data.currentQuestion || 0);
-      setMatchStatus(data.status || 'pending');
+      if (data) {
+        setCurrentQ(data.currentQuestion || 0);
+        setMatchStatus(data.status || 'pending');
+      }
     });
     return unsub;
   }, [matchId]);
@@ -212,10 +220,21 @@ export default function MatchPage() {
     });
   }, [syncToFirebase]);
 
-  if (!match) {
+  if (match === undefined) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-950">
         <div className="text-gray-400 text-xl">Loading match...</div>
+      </div>
+    );
+  }
+
+  if (match === null) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 h-screen bg-gray-950 px-4">
+        <p className="text-gray-400 text-center max-w-md">Match not found or could not be loaded.</p>
+        <Link to="/admin" className="text-indigo-400 hover:text-indigo-300 underline text-sm">
+          Back to Admin
+        </Link>
       </div>
     );
   }

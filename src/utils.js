@@ -7,15 +7,6 @@ export function shuffleArray(arr) {
   return shuffled;
 }
 
-export function distributeQuestions(questions, numMatches) {
-  const shuffled = shuffleArray(questions);
-  const groups = Array.from({ length: numMatches }, () => []);
-  shuffled.forEach((q, i) => {
-    groups[i % numMatches].push(q);
-  });
-  return groups;
-}
-
 /**
  * Build multiple-choice fields from a flat question (answer + optional category).
  * If `choices` and `correctIndex` already exist, the question is returned unchanged.

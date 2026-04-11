@@ -176,7 +176,12 @@ export function subscribeMatch(id, callback) {
   if (!id) return () => {};
 
   const safeRun = () => {
-    getMatch(id).then((m) => m && callback(m)).catch(console.error);
+    getMatch(id)
+      .then((m) => callback(m))
+      .catch((err) => {
+        console.error('subscribeMatch:', err);
+        callback(null);
+      });
   };
 
   safeRun();

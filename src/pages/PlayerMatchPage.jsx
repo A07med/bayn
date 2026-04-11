@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import {
   subscribeMatch,
   incrementMatchTeamScore,
@@ -21,7 +21,8 @@ function teamStorageKey(matchId) {
 
 export default function PlayerMatchPage() {
   const { matchId } = useParams();
-  const [match, setMatch] = useState(null);
+  /** undefined = still loading; null = missing or failed to load */
+  const [match, setMatch] = useState(undefined);
   const [teamPick, setTeamPick] = useState(null);
   const [correctCount, setCorrectCount] = useState(0);
   const [wrongCount, setWrongCount] = useState(0);
@@ -45,6 +46,11 @@ export default function PlayerMatchPage() {
   }, [matchId]);
 
   useEffect(() => {
+    setMatch(undefined);
+    if (!matchId) {
+      setMatch(null);
+      return undefined;
+    }
     const unsub = subscribeMatch(matchId, setMatch);
     return unsub;
   }, [matchId]);
@@ -206,13 +212,29 @@ export default function PlayerMatchPage() {
     scheduleQuestionAdvance(qIndex);
   }
 
-  if (!match) {
+  if (match === undefined) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-950">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
           <div className="text-gray-400 text-xl">جاري تحميل المباراة...</div>
         </div>
+      </div>
+    );
+  }
+
+  if (match === null) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 gap-6" dir="rtl">
+        <p className="text-gray-300 text-lg text-center max-w-md">
+          لم يتم العثور على هذه المباراة، أو تعذّر الاتصال بقاعدة البيانات.
+        </p>
+        <Link
+          to="/"
+          className="text-indigo-400 hover:text-indigo-300 underline text-sm font-medium"
+        >
+          العودة لاختيار المباراة
+        </Link>
       </div>
     );
   }

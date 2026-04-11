@@ -6,7 +6,7 @@ A real-time web application for managing live university competition rounds with
 
 ## Features
 
-- **Admin Dashboard** — Manage teams, create matches, upload/distribute questions
+- **Admin Dashboard** — Manage teams, create matches, upload questions and apply the full bank to every match
 - **Parallel Matches** — Run 4+ independent matches simultaneously, each with its own timer and questions
 - **Real-time Sync** — Supabase Realtime powers live updates across all screens
 - **Live Overview** — Big-screen display showing all matches in real-time
@@ -73,8 +73,8 @@ Question JSON format:
 ### Step 3: Create Matches
 Go to Matches tab → Create 4 matches by selecting Team A and Team B for each.
 
-### Step 4: Distribute Questions
-Click "Shuffle & Distribute to Matches". Questions are randomly split across all matches with no repetition.
+### Step 4: Apply questions to all matches
+Click **Apply bank to all matches**. The full question set (shuffled once, MCQ-enriched) is copied to every match.
 
 ### Step 5: Run the Competition
 Open each match page in a separate browser tab. Controls:
