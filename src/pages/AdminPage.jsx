@@ -7,7 +7,7 @@ import {
   subscribeAllMatchTeamResults,
   clearMatchTeamResultsForMatches,
 } from '../services/supabaseService';
-import { distributeQuestions, enrichQuestionWithMcq } from '../utils';
+import { distributeQuestions, enrichQuestionWithMcq, withBase } from '../utils';
 import { Plus, Trash2, Upload, RefreshCw, Users, Swords, HelpCircle, Play } from 'lucide-react';
 
 export default function AdminPage() {
@@ -456,7 +456,7 @@ export default function AdminPage() {
                 )}
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <a
-                    href={`/admin/match/${match.id}`}
+                    href={withBase(`/admin/match/${match.id}`)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block text-center bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg text-sm text-white transition-colors"
@@ -465,7 +465,7 @@ export default function AdminPage() {
                     Control
                   </a>
                   <a
-                    href={`/play/${match.id}`}
+                    href={withBase(`/play/${match.id}`)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block text-center bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg text-sm text-green-400 transition-colors"

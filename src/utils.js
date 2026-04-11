@@ -58,6 +58,14 @@ export function enrichQuestionWithMcq(question, answerPool, numChoices = 4) {
   };
 }
 
+/** Use for plain <a href> / window.location when app has a Vite base (e.g. GitHub Pages /bayn/). */
+export function withBase(path) {
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  if (!base) return normalized;
+  return `${base}${normalized}`;
+}
+
 export function formatTime(seconds) {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);

@@ -1,19 +1,47 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { subscribeMatches } from '../services/supabaseService';
-import { Gamepad2, Swords, ChevronRight, Monitor, Shield } from 'lucide-react';
+import { subscribeMatches, getMatches } from '../services/supabaseService';
+import { isSupabaseConfigured } from '../supabase';
+import { Gamepad2, Swords, ChevronRight, Monitor, Shield, AlertTriangle } from 'lucide-react';
 
 export default function HomePage() {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
+  const configured = isSupabaseConfigured();
 
   useEffect(() => {
-    const unsub = subscribeMatches((data) => {
-      setMatches(data);
+    if (!configured) {
       setLoading(false);
+      setFetchError(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setFetchError(null);
+    getMatches()
+      .then((data) => {
+        if (!cancelled) {
+          setMatches(data);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+        if (!cancelled) {
+          setFetchError(err.message || String(err));
+          setLoading(false);
+        }
+      });
+
+    const unsub = subscribeMatches((data) => {
+      if (!cancelled) setMatches(data);
     });
-    return unsub;
-  }, []);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [configured]);
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-4">
@@ -35,10 +63,43 @@ export default function HomePage() {
           <h2 className="text-xl font-bold text-white mb-1">شاشة المتسابقين</h2>
           <p className="text-gray-500 text-sm mb-5">اختر مباراتك لعرض الأسئلة</p>
 
-          {loading ? (
+          {!configured ? (
+            <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-4 py-4 text-left text-sm space-y-2">
+              <div className="flex items-center gap-2 text-amber-200 font-bold">
+                <AlertTriangle size={18} />
+                Supabase not configured (deployment)
+              </div>
+              <p className="text-amber-100/90">
+                Add <code className="bg-black/30 px-1 rounded">VITE_SUPABASE_URL</code> and{' '}
+                <code className="bg-black/30 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> in your host
+                (Vercel / Netlify / GitHub Actions) Environment Variables, then trigger a new build.
+              </p>
+              <p className="text-gray-500 text-xs">
+                Local: copy <code className="bg-black/30 px-1">.env.example</code> to{' '}
+                <code className="bg-black/30 px-1">.env</code> — never commit real keys.
+              </p>
+            </div>
+          ) : loading ? (
             <div className="text-gray-600 text-sm py-4">جاري التحميل...</div>
+          ) : fetchError ? (
+            <div className="rounded-xl border border-red-800/60 bg-red-950/30 px-4 py-4 text-sm text-red-200 space-y-2">
+              <div className="flex items-center gap-2 font-bold">
+                <AlertTriangle size={18} />
+                Could not load matches
+              </div>
+              <p className="text-red-100/80 break-words">{fetchError}</p>
+              <p className="text-gray-500 text-xs">
+                Check Supabase URL/key, RLS policies, and that the <code className="bg-black/30 px-1">matches</code>{' '}
+                table exists.
+              </p>
+            </div>
           ) : matches.length === 0 ? (
-            <div className="text-gray-600 text-sm py-4">لا توجد مباريات حالياً</div>
+            <div className="text-gray-600 text-sm py-4 space-y-2">
+              <p>لا توجد مباريات حالياً</p>
+              <p className="text-gray-500 text-xs">
+                Open <span className="text-indigo-400">Admin</span> below, create teams and matches, then refresh.
+              </p>
+            </div>
           ) : (
             <div className="space-y-2">
               {matches.map((m) => (

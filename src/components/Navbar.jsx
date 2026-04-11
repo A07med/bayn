@@ -6,7 +6,8 @@ export default function Navbar() {
 
   function handleLogout() {
     sessionStorage.removeItem('admin_unlocked');
-    window.location.href = '/';
+    const home = new URL(import.meta.env.BASE_URL || '/', window.location.origin).href;
+    window.location.assign(home);
   }
 
   return (
