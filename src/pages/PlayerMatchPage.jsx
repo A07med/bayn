@@ -6,9 +6,9 @@ import {
   incrementMatchTeamSkip,
   getMatchTeamResults,
   advanceMatchQuestionIfCurrent,
-  applyMatchSkipCountdownSubtractIfCurrent,
+  applyPlayerTeamSkipPenaltyIfCurrent,
 } from '../services/supabaseService';
-import { formatTime, getCountdownRemainingSec, wallElapsedSec } from '../utils';
+import { formatTime, getCountdownRemainingSec, getCountdownRemainingSecForTeam, wallElapsedSec } from '../utils';
 import { Trophy, Clock, Zap, Users, CheckCircle2, XCircle, SkipForward } from 'lucide-react';
 
 const AUTO_ADVANCE_MS = 500;
@@ -189,7 +189,12 @@ export default function PlayerMatchPage() {
     setPickedChoice('SKIP');
 
     try {
-      const ok = await applyMatchSkipCountdownSubtractIfCurrent(matchId, qIndex, SKIP_SUBTRACT_SEC);
+      const ok = await applyPlayerTeamSkipPenaltyIfCurrent(
+        matchId,
+        teamPick.teamId,
+        qIndex,
+        SKIP_SUBTRACT_SEC
+      );
       if (!ok) {
         choiceLockedRef.current = false;
         setPickedChoice(null);
@@ -296,7 +301,7 @@ export default function PlayerMatchPage() {
   const pickedIdx = pickedChoice;
   const showAnswerFeedback = hasMcq && typeof pickedIdx === 'number';
   const interactionLocked = pickedChoice !== null;
-  const remainingSec = getCountdownRemainingSec(match);
+  const remainingSec = getCountdownRemainingSecForTeam(match, teamPick.teamId);
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col overflow-hidden" dir="rtl">
@@ -383,7 +388,7 @@ export default function PlayerMatchPage() {
         {/* Paused State */}
         {isPaused && (
           <div className="text-center space-y-6">
-            <div className="text-gray-500 text-sm">الوقت المتبقي للمباراة</div>
+            <div className="text-gray-500 text-sm">الوقت المتبقي لفريقكم</div>
             <div className="text-6xl md:text-8xl font-mono font-black text-yellow-400 timer-display">
               {formatTime(remainingSec)}
             </div>
@@ -397,7 +402,7 @@ export default function PlayerMatchPage() {
         {isRunning && question && (
           <>
             <div className="text-center">
-              <div className="text-gray-500 text-sm mb-1">الوقت المتبقي (المباراة)</div>
+              <div className="text-gray-500 text-sm mb-1">الوقت المتبقي لفريقكم</div>
               <div className="text-6xl md:text-9xl font-mono font-black text-green-400 timer-display animate-pulse">
                 {formatTime(remainingSec)}
               </div>

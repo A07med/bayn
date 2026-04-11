@@ -167,6 +167,29 @@ export async function applyMatchSkipCountdownSubtractIfCurrent(matchId, question
   return true;
 }
 
+/**
+ * Player skip: add time penalty for one team only (does not change shared question_ends_at).
+ * Admin skip still uses {@link applyMatchSkipCountdownSubtractIfCurrent}.
+ */
+export async function applyPlayerTeamSkipPenaltyIfCurrent(matchId, teamId, questionIndex, subtractSeconds) {
+  const match = await getMatch(matchId);
+  if (!match || match.status !== 'running') return false;
+  const cq = Number(match.currentQuestion) || 0;
+  if (cq !== questionIndex) return false;
+  const sub = Math.max(0, Number(subtractSeconds) || 0);
+  if (!sub) return true;
+  if (!teamId) return false;
+
+  const prev = { ...(match.teamSkipPenaltySec && typeof match.teamSkipPenaltySec === 'object' ? match.teamSkipPenaltySec : {}) };
+  const key = String(teamId);
+  prev[key] = Math.max(0, Number(prev[key]) || 0) + sub;
+
+  await updateMatch(matchId, {
+    teamSkipPenaltySec: prev,
+  });
+  return true;
+}
+
 export async function deleteMatch(id) {
   const { error } = await supabase.from('matches').delete().eq('id', id);
   if (error) throw error;
@@ -386,6 +409,10 @@ function normalizeMatch(row) {
     questionEndsAt: row.question_ends_at ?? null,
     pausedRemainingSec: row.paused_remaining_sec ?? null,
     matchStartedAt: row.match_started_at ?? null,
+    teamSkipPenaltySec:
+      row.team_skip_penalty_sec && typeof row.team_skip_penalty_sec === 'object'
+        ? row.team_skip_penalty_sec
+        : {},
   };
 }
 
@@ -403,6 +430,7 @@ function denormalizeMatch(obj) {
   if (obj.questionEndsAt !== undefined) row.question_ends_at = obj.questionEndsAt;
   if (obj.pausedRemainingSec !== undefined) row.paused_remaining_sec = obj.pausedRemainingSec;
   if (obj.matchStartedAt !== undefined) row.match_started_at = obj.matchStartedAt;
+  if (obj.teamSkipPenaltySec !== undefined) row.team_skip_penalty_sec = obj.teamSkipPenaltySec;
   return row;
 }
 

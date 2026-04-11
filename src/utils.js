@@ -106,3 +106,18 @@ export function getCountdownRemainingSec(match, nowMs = Date.now()) {
   }
   return Math.max(0, (endMs - nowMs) / 1000);
 }
+
+/** Cumulative seconds “taxed” from this team’s view of the clock (player skips only). */
+export function getTeamSkipPenaltySec(match, teamId) {
+  if (!teamId || !match?.teamSkipPenaltySec || typeof match.teamSkipPenaltySec !== 'object') return 0;
+  const key = String(teamId);
+  const m = match.teamSkipPenaltySec;
+  const v = m[key] ?? m[teamId];
+  return Math.max(0, Number(v) || 0);
+}
+
+/** Same wall-clock budget as {@link getCountdownRemainingSec}, minus this team’s skip penalties. */
+export function getCountdownRemainingSecForTeam(match, teamId, nowMs = Date.now()) {
+  const base = getCountdownRemainingSec(match, nowMs);
+  return Math.max(0, base - getTeamSkipPenaltySec(match, teamId));
+}

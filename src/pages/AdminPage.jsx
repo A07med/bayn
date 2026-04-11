@@ -220,6 +220,7 @@ export default function AdminPage() {
         questionEndsAt: null,
         pausedRemainingSec: null,
         matchStartedAt: null,
+        teamSkipPenaltySec: {},
       });
     }
     await loadData();

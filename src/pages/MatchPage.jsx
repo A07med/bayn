@@ -163,6 +163,7 @@ export default function MatchPage() {
       questionEndsAt: nextQuestionEndsIso(gameSeconds),
       pausedRemainingSec: null,
       elapsedTime: 0,
+      teamSkipPenaltySec: {},
     });
     setMatchStatus('running');
   }, [matchStatus, syncToFirebase]);
@@ -217,6 +218,7 @@ export default function MatchPage() {
       questionEndsAt: null,
       pausedRemainingSec: null,
       matchStartedAt: null,
+      teamSkipPenaltySec: {},
     });
   }, [syncToFirebase]);
 
