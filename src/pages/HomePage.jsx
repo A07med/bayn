@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { subscribeMatches } from '../services/supabaseService';
-import { Gamepad2, Swords, ChevronRight, Monitor } from 'lucide-react';
+import { Gamepad2, Swords, ChevronRight, Monitor, Shield } from 'lucide-react';
 
 export default function HomePage() {
   const [matches, setMatches] = useState([]);
@@ -73,13 +73,22 @@ export default function HomePage() {
           )}
         </div>
 
-        <Link
-          to="/live"
-          className="inline-flex items-center gap-2 text-gray-500 hover:text-indigo-400 text-sm transition-colors"
-        >
-          <Monitor size={16} />
-          <span>الشاشة الرئيسية (عرض مباشر)</span>
-        </Link>
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 text-sm">
+          <Link
+            to="/live"
+            className="inline-flex items-center gap-2 text-gray-500 hover:text-indigo-400 transition-colors"
+          >
+            <Monitor size={16} />
+            <span>الشاشة الرئيسية (عرض مباشر)</span>
+          </Link>
+          <Link
+            to="/admin"
+            className="inline-flex items-center gap-2 text-gray-600 hover:text-amber-400/90 transition-colors"
+          >
+            <Shield size={16} />
+            <span>لوحة المشرف / Admin</span>
+          </Link>
+        </div>
       </div>
     </div>
   );
