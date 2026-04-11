@@ -93,7 +93,7 @@ export default function PlayerMatchPage() {
     }
   }, [match?.status]);
 
-  const [, setCountdownTick] = useState(0);
+  const [countdownTick, setCountdownTick] = useState(0);
 
   useEffect(() => {
     if (match?.status !== 'running' && match?.status !== 'paused') return;
