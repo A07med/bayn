@@ -58,17 +58,56 @@ export async function getMatch(id) {
   return data ? normalizeMatch(data) : null;
 }
 
+function matchSchemaErrorColumn(msg) {
+  const m = String(msg).match(/Could not find the '([^']+)' column of 'matches'/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Older Supabase projects may lack countdown / duration columns. PostgREST returns one
+ * missing-column error at a time; strip and retry until the row applies or error changes.
+ */
+async function withMatchesRowFallback(row, run) {
+  let current = { ...row };
+  let loggedPatchHint = false;
+  for (let i = 0; i < 24; i++) {
+    try {
+      return await run(current);
+    } catch (err) {
+      const col = matchSchemaErrorColumn(err?.message || err?.error_description || err);
+      if (col && Object.prototype.hasOwnProperty.call(current, col)) {
+        if (!loggedPatchHint) {
+          console.warn(
+            '[matches] Omitting column(s) missing from your DB. Run `supabase-patch-matches-columns.sql` (or ALTERs in supabase-schema.sql) in the Supabase SQL Editor so game duration and countdown persist.'
+          );
+          loggedPatchHint = true;
+        }
+        const next = { ...current };
+        delete next[col];
+        current = next;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('matches: too many schema fallbacks');
+}
+
 export async function createMatch(match) {
   const row = denormalizeMatch(match);
-  const { data, error } = await supabase.from('matches').insert(row).select().single();
-  if (error) throw error;
-  return normalizeMatch(data);
+  return withMatchesRowFallback(row, async (r) => {
+    const { data, error } = await supabase.from('matches').insert(r).select().single();
+    if (error) throw error;
+    return normalizeMatch(data);
+  });
 }
 
 export async function updateMatch(id, updates) {
   const row = denormalizeMatch(updates);
-  const { error } = await supabase.from('matches').update(row).eq('id', id);
-  if (error) throw error;
+  await withMatchesRowFallback(row, async (r) => {
+    const { error } = await supabase.from('matches').update(r).eq('id', id);
+    if (error) throw error;
+  });
 }
 
 /**
