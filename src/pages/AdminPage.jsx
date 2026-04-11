@@ -8,7 +8,8 @@ import {
   clearMatchTeamResultsForMatches,
 } from '../services/supabaseService';
 import { distributeQuestions, enrichQuestionWithMcq, withBase } from '../utils';
-import { Plus, Trash2, Upload, RefreshCw, Users, Swords, HelpCircle, Play } from 'lucide-react';
+import { isSupabaseConfigured } from '../supabase';
+import { Plus, Trash2, Upload, RefreshCw, Users, Swords, HelpCircle, Play, AlertTriangle } from 'lucide-react';
 
 export default function AdminPage() {
   const [teams, setTeams] = useState([]);
@@ -21,6 +22,9 @@ export default function AdminPage() {
   const [teamForm, setTeamForm] = useState({ name: '', player1: '', player2: '', player3: '' });
   const [editingTeam, setEditingTeam] = useState(null);
   const [matchForm, setMatchForm] = useState({ teamAId: '', teamBId: '', gameDurationMinutes: 15 });
+  const [matchCreateBusy, setMatchCreateBusy] = useState(false);
+
+  const supabaseReady = isSupabaseConfigured();
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -109,25 +113,63 @@ export default function AdminPage() {
 
   async function handleCreateMatch(e) {
     e.preventDefault();
-    if (matchForm.teamAId === matchForm.teamBId) return alert('Select two different teams');
-    const teamA = teams.find((t) => t.id === matchForm.teamAId);
-    const teamB = teams.find((t) => t.id === matchForm.teamBId);
-    if (!teamA || !teamB) return;
+    if (!supabaseReady) {
+      alert('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then restart the dev server or rebuild.');
+      return;
+    }
+    if (teams.length < 2) {
+      alert('Add at least two teams on the Teams tab before creating a match.');
+      return;
+    }
+    if (!matchForm.teamAId || !matchForm.teamBId) {
+      alert('Select Team A and Team B.');
+      return;
+    }
+    if (matchForm.teamAId === matchForm.teamBId) {
+      alert('Select two different teams.');
+      return;
+    }
+    const teamA = teams.find((t) => String(t.id) === String(matchForm.teamAId));
+    const teamB = teams.find((t) => String(t.id) === String(matchForm.teamBId));
+    if (!teamA || !teamB) {
+      alert('Could not resolve the selected teams. Refresh the page and try again.');
+      return;
+    }
 
     const mins = Math.max(1, Math.min(24 * 60, Number(matchForm.gameDurationMinutes) || 15));
-    await createMatch({
-      teamA: { id: teamA.id, name: teamA.name, players: teamA.players },
-      teamB: { id: teamB.id, name: teamB.name, players: teamB.players },
-      questions: [],
-      currentQuestion: 0,
-      status: 'pending',
-      elapsedTime: 0,
-      penalties: 0,
-      matchNumber: matches.length + 1,
-      gameDurationMinutes: mins,
-    });
-    setMatchForm({ teamAId: '', teamBId: '', gameDurationMinutes: 15 });
-    await loadData();
+    const nextMatchNumber =
+      matches.reduce((max, m) => Math.max(max, Number(m.matchNumber) || 0), 0) + 1;
+
+    setMatchCreateBusy(true);
+    try {
+      await createMatch({
+        teamA: {
+          id: teamA.id,
+          name: teamA.name,
+          players: Array.isArray(teamA.players) ? teamA.players : [],
+        },
+        teamB: {
+          id: teamB.id,
+          name: teamB.name,
+          players: Array.isArray(teamB.players) ? teamB.players : [],
+        },
+        questions: [],
+        currentQuestion: 0,
+        status: 'pending',
+        elapsedTime: 0,
+        penalties: 0,
+        matchNumber: nextMatchNumber,
+        gameDurationMinutes: mins,
+      });
+      setMatchForm({ teamAId: '', teamBId: '', gameDurationMinutes: 15 });
+      await loadData();
+    } catch (err) {
+      console.error('Create match failed:', err);
+      const msg = err?.message || err?.error_description || String(err);
+      alert(`Could not create match: ${msg}`);
+    } finally {
+      setMatchCreateBusy(false);
+    }
   }
 
   async function handleDeleteMatch(id) {
@@ -207,6 +249,7 @@ export default function AdminPage() {
           const Icon = tabItem.icon;
           return (
             <button
+              type="button"
               key={tabItem.key}
               onClick={() => setTab(tabItem.key)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -322,6 +365,25 @@ export default function AdminPage() {
       {/* ── Matches Tab ── */}
       {tab === 'matches' && (
         <div className="space-y-4">
+          {!supabaseReady && (
+            <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-100/90 flex gap-2 items-start">
+              <AlertTriangle size={18} className="shrink-0 text-amber-300 mt-0.5" />
+              <div>
+                <p className="font-semibold text-amber-100">Supabase is not configured</p>
+                <p className="text-amber-100/80 mt-1">
+                  Set <code className="bg-black/30 px-1 rounded">VITE_SUPABASE_URL</code> and{' '}
+                  <code className="bg-black/30 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> in{' '}
+                  <code className="bg-black/30 px-1 rounded">.env</code>, then restart{' '}
+                  <code className="bg-black/30 px-1 rounded">npm run dev</code>.
+                </p>
+              </div>
+            </div>
+          )}
+          {supabaseReady && teams.length < 2 && (
+            <p className="text-sm text-amber-200/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+              Add at least <strong>two teams</strong> on the Teams tab to enable match creation.
+            </p>
+          )}
           <form onSubmit={handleCreateMatch} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
             <h2 className="text-lg font-semibold mb-3">Create Match</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -329,7 +391,8 @@ export default function AdminPage() {
                 value={matchForm.teamAId}
                 onChange={(e) => setMatchForm({ ...matchForm, teamAId: e.target.value })}
                 required
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+                disabled={!supabaseReady || teams.length < 2}
+                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="">Select Team A</option>
                 {teams.map((t) => (
@@ -340,7 +403,8 @@ export default function AdminPage() {
                 value={matchForm.teamBId}
                 onChange={(e) => setMatchForm({ ...matchForm, teamBId: e.target.value })}
                 required
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+                disabled={!supabaseReady || teams.length < 2}
+                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="">Select Team B</option>
                 {teams.map((t) => (
@@ -354,21 +418,23 @@ export default function AdminPage() {
                   min={1}
                   max={1440}
                   value={matchForm.gameDurationMinutes}
+                  disabled={!supabaseReady || teams.length < 2}
                   onChange={(e) =>
                     setMatchForm({
                       ...matchForm,
                       gameDurationMinutes: Number(e.target.value) || 15,
                     })
                   }
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 max-w-xs"
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 max-w-xs disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               </label>
             </div>
             <button
               type="submit"
-              className="mt-3 bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+              disabled={matchCreateBusy || !supabaseReady || teams.length < 2}
+              className="mt-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
             >
-              <Plus size={16} /> Create Match
+              <Plus size={16} /> {matchCreateBusy ? 'Creating…' : 'Create Match'}
             </button>
           </form>
 
