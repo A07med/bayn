@@ -11,8 +11,6 @@ import {
 import { formatTime, getCountdownRemainingSec, getCountdownRemainingSecForTeam, wallElapsedSec } from '../utils';
 import { Trophy, Clock, Zap, Users, CheckCircle2, XCircle, SkipForward } from 'lucide-react';
 
-/** Delay before advancing after answer/skip */
-const AUTO_ADVANCE_MS = 150;
 /** Seconds removed from countdown on skip (same magnitude as admin Skip) */
 const SKIP_SUBTRACT_SEC = 10;
 
@@ -30,7 +28,6 @@ export default function PlayerMatchPage() {
   const [skippedCount, setSkippedCount] = useState(0);
   const [pickedChoice, setPickedChoice] = useState(null);
   const choiceLockedRef = useRef(false);
-  const advanceTimeoutRef = useRef(null);
   const countdownAdvanceLockRef = useRef(false);
   const matchRef = useRef(null);
   matchRef.current = match;
@@ -59,19 +56,11 @@ export default function PlayerMatchPage() {
   const currentQ = match?.currentQuestion ?? 0;
 
   useEffect(() => {
-    if (advanceTimeoutRef.current) {
-      clearTimeout(advanceTimeoutRef.current);
-      advanceTimeoutRef.current = null;
-    }
     queueMicrotask(() => {
       setPickedChoice(null);
       choiceLockedRef.current = false;
     });
   }, [currentQ]);
-
-  useEffect(() => () => {
-    if (advanceTimeoutRef.current) clearTimeout(advanceTimeoutRef.current);
-  }, []);
 
   useEffect(() => {
     if (!matchId || !teamPick?.teamId) return;
@@ -86,13 +75,6 @@ export default function PlayerMatchPage() {
       })
       .catch(console.error);
   }, [matchId, teamPick?.teamId, match?.status]);
-
-  useEffect(() => {
-    if (match?.status === 'completed' && advanceTimeoutRef.current) {
-      clearTimeout(advanceTimeoutRef.current);
-      advanceTimeoutRef.current = null;
-    }
-  }, [match?.status]);
 
   const [countdownTick, setCountdownTick] = useState(0);
 
@@ -126,13 +108,9 @@ export default function PlayerMatchPage() {
   }, [match, matchId, match?.currentQuestion, match?.questionEndsAt, match?.status, countdownTick]);
 
   function scheduleQuestionAdvance(qIndex) {
-    if (advanceTimeoutRef.current) clearTimeout(advanceTimeoutRef.current);
-    advanceTimeoutRef.current = setTimeout(() => {
-      advanceTimeoutRef.current = null;
-      advanceMatchQuestionIfCurrent(matchId, qIndex).catch((err) =>
-        console.error('Auto-advance failed', err)
-      );
-    }, AUTO_ADVANCE_MS);
+    void advanceMatchQuestionIfCurrent(matchId, qIndex).catch((err) =>
+      console.error('Auto-advance failed', err)
+    );
   }
 
   function selectTeam(side) {
