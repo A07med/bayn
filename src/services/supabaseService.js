@@ -131,6 +131,10 @@ function withUpdatedTeamState(match, teamId, teamStatePatch) {
   };
 }
 
+function isTeamDoneStatus(status) {
+  return status === 'completed' || status === 'finished';
+}
+
 export async function createMatch(match) {
   const durationMin = getGameDurationMinutes(match);
   const teamIds = [match?.teamA?.id, match?.teamB?.id].filter(Boolean);
@@ -210,7 +214,7 @@ export async function advanceTeamQuestionIfCurrent(matchId, teamId, answeredAtIn
   const allIds = getTeamIdList(match);
   const allDone =
     allIds.length > 0 &&
-    allIds.every((id) => (teamStates[String(id)]?.status || 'pending') === 'completed');
+    allIds.every((id) => isTeamDoneStatus(teamStates[String(id)]?.status || 'pending'));
   await updateMatch(matchId, {
     teamStates,
     ...(allDone ? { status: 'completed' } : {}),
@@ -226,7 +230,7 @@ export async function completeTeamIfRunning(matchId, teamId) {
   if (!state || state.status !== 'running') return false;
 
   const teamStates = withUpdatedTeamState(match, teamId, {
-    status: 'completed',
+    status: 'finished',
     questionEndsAt: null,
     pausedRemainingSec: null,
     elapsedTime: wallElapsedSec(state),
@@ -234,7 +238,7 @@ export async function completeTeamIfRunning(matchId, teamId) {
   const allIds = getTeamIdList(match);
   const allDone =
     allIds.length > 0 &&
-    allIds.every((id) => (teamStates[String(id)]?.status || 'pending') === 'completed');
+    allIds.every((id) => isTeamDoneStatus(teamStates[String(id)]?.status || 'pending'));
   await updateMatch(matchId, {
     teamStates,
     ...(allDone ? { status: 'completed' } : {}),

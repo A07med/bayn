@@ -163,6 +163,7 @@ export default function PlayerMatchPage() {
 
   async function handleChoice(choiceIndex) {
     if (!teamPick?.teamId || !match || teamState?.status !== 'running') return;
+    if (teamState?.status === 'finished' || teamState?.status === 'completed') return;
     if (isAnswered || choiceLockedRef.current) return;
     const qIndex = currentQ;
     const q = teamState?.questions?.[qIndex];
@@ -195,6 +196,7 @@ export default function PlayerMatchPage() {
 
   async function handleSkip() {
     if (!teamPick?.teamId || !match || teamState?.status !== 'running') return;
+    if (teamState?.status === 'finished' || teamState?.status === 'completed') return;
     if (choiceLockedRef.current || isAnswered) return;
     const qIndex = currentQ;
     const q = teamState?.questions?.[qIndex];
@@ -287,7 +289,12 @@ export default function PlayerMatchPage() {
 
   const questions = teamState?.questions || [];
   const question = questions[currentQ];
-  const isCompleted = teamState?.status === 'completed' || match.status === 'completed';
+  const remainingSec = getCountdownRemainingSecForTeam(match, teamPick.teamId);
+  const isTeamFinished =
+    teamState?.status === 'finished' ||
+    teamState?.status === 'completed' ||
+    remainingSec <= 0;
+  const isCompleted = isTeamFinished || match.status === 'completed';
   const isRunning = teamState?.status === 'running';
   const isPending = (teamState?.status || 'pending') === 'pending';
   const isPaused = teamState?.status === 'paused';
@@ -305,8 +312,7 @@ export default function PlayerMatchPage() {
 
   const pickedIdx = typeof selectedAnswer === 'number' ? selectedAnswer : null;
   const showAnswerFeedback = hasMcq && isAnswered;
-  const interactionLocked = isAnswered;
-  const remainingSec = getCountdownRemainingSecForTeam(match, teamPick.teamId);
+  const interactionLocked = isAnswered || isTeamFinished;
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col overflow-hidden" dir="rtl">
@@ -489,6 +495,11 @@ export default function PlayerMatchPage() {
               {selectedAnswer === 'SKIP' && (
                 <p className="text-center text-amber-200/90 text-sm mt-4 max-w-xl mx-auto leading-relaxed">
                   تم خصم {SKIP_SUBTRACT_SEC} ثانية من الوقت المتبقي. الانتقال للسؤال التالي خلال لحظات.
+                </p>
+              )}
+              {isTeamFinished && (
+                <p className="text-center text-red-300 text-sm mt-4 max-w-xl mx-auto leading-relaxed">
+                  Time is up - this team is finished.
                 </p>
               )}
               {hasMcq && showAnswerFeedback && (
