@@ -4,6 +4,7 @@ import {
   subscribeMatch,
   updateMatch,
   advanceTeamQuestionIfCurrent,
+  completeTeamIfRunning,
   applyPlayerTeamSkipPenaltyIfCurrent,
   getMatchTeamResults,
 } from '../services/supabaseService';
@@ -97,7 +98,7 @@ export default function MatchPage() {
     return () => clearInterval(id);
   }, [matchStatus, matchId, syncToFirebase]);
 
-  /** Countdown hit zero → next question, no score change. */
+  /** Countdown hit zero → end selected team only, no effect on other teams. */
   useEffect(() => {
     const m = matchRef.current;
     if (!m || !selectedTeamId || !matchId) {
@@ -109,8 +110,6 @@ export default function MatchPage() {
       countdownAdvanceLockRef.current = false;
       return;
     }
-    const q = ts.currentQuestion ?? 0;
-    if (!ts.questions?.[q]) return;
     const rem = getCountdownRemainingSecForTeam(m, selectedTeamId);
     if (rem > 0.15) {
       countdownAdvanceLockRef.current = false;
@@ -118,7 +117,7 @@ export default function MatchPage() {
     }
     if (countdownAdvanceLockRef.current) return;
     countdownAdvanceLockRef.current = true;
-    advanceTeamQuestionIfCurrent(matchId, selectedTeamId, q)
+    completeTeamIfRunning(matchId, selectedTeamId)
       .catch((e) => console.error(e))
       .finally(() => {
         countdownAdvanceLockRef.current = false;

@@ -6,6 +6,7 @@ import {
   incrementMatchTeamSkip,
   getMatchTeamResults,
   advanceTeamQuestionIfCurrent,
+  completeTeamIfRunning,
   applyPlayerTeamSkipPenaltyIfCurrent,
 } from '../services/supabaseService';
 import { formatTime, getCountdownRemainingSecForTeam, getMatchTeamState, wallElapsedSec } from '../utils';
@@ -86,7 +87,7 @@ export default function PlayerMatchPage() {
     return () => clearInterval(id);
   }, [teamState?.status]);
 
-  /** Countdown → 0: next question, no score (unanswered). */
+  /** Countdown → 0: end this team only (other teams continue). */
   useEffect(() => {
     const m = matchRef.current;
     if (!m || !teamPick?.teamId || !matchId) {
@@ -98,8 +99,6 @@ export default function PlayerMatchPage() {
       countdownAdvanceLockRef.current = false;
       return;
     }
-    const q = ts.currentQuestion ?? 0;
-    if (!ts.questions?.[q]) return;
     const rem = getCountdownRemainingSecForTeam(m, teamPick.teamId);
     if (rem > 0.15) {
       countdownAdvanceLockRef.current = false;
@@ -107,12 +106,12 @@ export default function PlayerMatchPage() {
     }
     if (countdownAdvanceLockRef.current) return;
     countdownAdvanceLockRef.current = true;
-    advanceTeamQuestionIfCurrent(matchId, teamPick.teamId, q)
+    completeTeamIfRunning(matchId, teamPick.teamId)
       .catch((e) => console.error(e))
       .finally(() => {
         countdownAdvanceLockRef.current = false;
       });
-  }, [match, matchId, teamPick?.teamId, teamState?.currentQuestion, teamState?.questionEndsAt, teamState?.status, countdownTick]);
+  }, [match, matchId, teamPick?.teamId, teamState?.questionEndsAt, teamState?.status, countdownTick]);
 
   function scheduleQuestionAdvance(qIndex) {
     if (!teamPick?.teamId) return;

@@ -218,6 +218,30 @@ export async function advanceTeamQuestionIfCurrent(matchId, teamId, answeredAtIn
   return true;
 }
 
+/** End one team only when its timer reaches zero; other teams continue. */
+export async function completeTeamIfRunning(matchId, teamId) {
+  const match = await getMatch(matchId);
+  if (!match || !teamId) return false;
+  const state = getTeamState(match, teamId);
+  if (!state || state.status !== 'running') return false;
+
+  const teamStates = withUpdatedTeamState(match, teamId, {
+    status: 'completed',
+    questionEndsAt: null,
+    pausedRemainingSec: null,
+    elapsedTime: wallElapsedSec(state),
+  });
+  const allIds = getTeamIdList(match);
+  const allDone =
+    allIds.length > 0 &&
+    allIds.every((id) => (teamStates[String(id)]?.status || 'pending') === 'completed');
+  await updateMatch(matchId, {
+    teamStates,
+    ...(allDone ? { status: 'completed' } : {}),
+  });
+  return true;
+}
+
 /**
  * Subtract seconds from the whole-game countdown (min remaining 0). Does not advance.
  */
