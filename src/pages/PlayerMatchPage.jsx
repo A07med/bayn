@@ -28,6 +28,7 @@ export default function PlayerMatchPage() {
   const [wrongCount, setWrongCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
   const [pickedChoice, setPickedChoice] = useState(null);
+  const [localCurrentQ, setLocalCurrentQ] = useState(null);
   const choiceLockedRef = useRef(false);
   const countdownAdvanceLockRef = useRef(false);
   const matchRef = useRef(null);
@@ -55,7 +56,15 @@ export default function PlayerMatchPage() {
   }, [matchId]);
 
   const teamState = teamPick?.teamId ? getMatchTeamState(match, teamPick.teamId) : null;
-  const currentQ = teamState?.currentQuestion ?? 0;
+  const remoteCurrentQ = teamState?.currentQuestion ?? 0;
+  const currentQ = localCurrentQ ?? remoteCurrentQ;
+
+  useEffect(() => {
+    if (localCurrentQ == null) return;
+    if (remoteCurrentQ >= localCurrentQ) {
+      setLocalCurrentQ(null);
+    }
+  }, [localCurrentQ, remoteCurrentQ]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -120,6 +129,13 @@ export default function PlayerMatchPage() {
     );
   }
 
+  function instantLocalAdvance(fromQ) {
+    const nextQ = Number(fromQ) + 1;
+    setPickedChoice(null);
+    choiceLockedRef.current = false;
+    setLocalCurrentQ(nextQ);
+  }
+
   function selectTeam(side) {
     if (!match) return;
     const t = side === 'A' ? match.teamA : match.teamB;
@@ -155,7 +171,8 @@ export default function PlayerMatchPage() {
       setWrongCount((c) => c + 1);
     }
 
-    // Advance immediately; persist score in background to avoid UX lag.
+    // Advance visually right away; sync persists in background.
+    instantLocalAdvance(qIndex);
     scheduleQuestionAdvance(qIndex);
     void incrementMatchTeamScore(matchId, teamPick.teamId, ok ? 1 : 0, ok ? 0 : 1).catch((e) => {
       console.error('Could not save team score (did you run supabase-schema.sql?)', e);
@@ -191,6 +208,7 @@ export default function PlayerMatchPage() {
       }
       setCountdownTick((t) => t + 1);
       setSkippedCount((s) => s + 1);
+      instantLocalAdvance(qIndex);
       scheduleQuestionAdvance(qIndex);
       void incrementMatchTeamSkip(matchId, teamPick.teamId, 1).catch((err) => {
         console.error('Skip stat failed', err);

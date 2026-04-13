@@ -226,7 +226,10 @@ export default function MatchPage() {
       /* ignore */
     }
     setShowAnswer(false);
-    await advanceTeamQuestionIfCurrent(matchId, selectedTeamId, currentQ);
+    setCurrentQ((q) => q + 1);
+    void advanceTeamQuestionIfCurrent(matchId, selectedTeamId, currentQ).catch((e) =>
+      console.error('Correct advance failed', e)
+    );
   }, [match, currentQ, matchId, selectedTeamId]);
 
   const handleSkip = useCallback(async () => {
@@ -239,8 +242,13 @@ export default function MatchPage() {
       /* ignore */
     }
     setShowAnswer(false);
-    await applyPlayerTeamSkipPenaltyIfCurrent(matchId, selectedTeamId, currentQ, SKIP_SUBTRACT_SEC);
-    await advanceTeamQuestionIfCurrent(matchId, selectedTeamId, currentQ);
+    setCurrentQ((q) => q + 1);
+    void applyPlayerTeamSkipPenaltyIfCurrent(matchId, selectedTeamId, currentQ, SKIP_SUBTRACT_SEC).catch((e) =>
+      console.error('Skip penalty failed', e)
+    );
+    void advanceTeamQuestionIfCurrent(matchId, selectedTeamId, currentQ).catch((e) =>
+      console.error('Skip advance failed', e)
+    );
   }, [match, currentQ, matchId, selectedTeamId]);
 
   const handleReset = useCallback(() => {
