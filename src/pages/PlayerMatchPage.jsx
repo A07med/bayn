@@ -14,7 +14,7 @@ import { Trophy, Clock, Zap, Users, CheckCircle2, XCircle, SkipForward } from 'l
 
 /** Seconds removed from countdown on skip (same magnitude as admin Skip) */
 const SKIP_SUBTRACT_SEC = 10;
-const NEXT_QUESTION_DELAY_MS = 700;
+const NEXT_QUESTION_DELAY_MS = 180;
 
 function teamStorageKey(matchId) {
   return `arena_play_team_${matchId}`;
