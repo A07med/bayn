@@ -14,7 +14,7 @@ import { Trophy, Clock, Zap, Users, CheckCircle2, XCircle, SkipForward } from 'l
 
 /** Seconds removed from countdown on skip (same magnitude as admin Skip) */
 const SKIP_SUBTRACT_SEC = 10;
-const NEXT_QUESTION_DELAY_MS = 180;
+const NEXT_QUESTION_DELAY_MS = 70;
 
 function teamStorageKey(matchId) {
   return `arena_play_team_${matchId}`;
@@ -31,6 +31,7 @@ export default function PlayerMatchPage() {
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [isCorrect, setIsCorrect] = useState(null);
   const [isAnswered, setIsAnswered] = useState(false);
+  const [localCurrentQ, setLocalCurrentQ] = useState(null);
   const advanceTimeoutRef = useRef(null);
   const choiceLockedRef = useRef(false);
   const countdownAdvanceLockRef = useRef(false);
@@ -60,7 +61,14 @@ export default function PlayerMatchPage() {
 
   const teamState = teamPick?.teamId ? getMatchTeamState(match, teamPick.teamId) : null;
   const remoteCurrentQ = teamState?.currentQuestion ?? 0;
-  const currentQ = remoteCurrentQ;
+  const currentQ = localCurrentQ ?? remoteCurrentQ;
+
+  useEffect(() => {
+    if (localCurrentQ == null) return;
+    if (remoteCurrentQ >= localCurrentQ) {
+      setLocalCurrentQ(null);
+    }
+  }, [localCurrentQ, remoteCurrentQ]);
 
   useEffect(() => {
     if (advanceTimeoutRef.current) {
@@ -136,6 +144,9 @@ export default function PlayerMatchPage() {
     if (advanceTimeoutRef.current) {
       clearTimeout(advanceTimeoutRef.current);
     }
+    const next = Number(qIndex) + 1;
+    // UI-first: render next question immediately after a tiny feedback window.
+    setLocalCurrentQ((prev) => (prev == null || prev < next ? next : prev));
     advanceTimeoutRef.current = setTimeout(() => {
       advanceTimeoutRef.current = null;
       void advanceTeamQuestionIfCurrent(matchId, teamPick.teamId, qIndex).catch((err) =>
