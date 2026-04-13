@@ -156,13 +156,16 @@ export default function PlayerMatchPage() {
       setWrongCount((c) => c + 1);
     }
 
-    try {
-      await incrementMatchTeamScore(matchId, teamPick.teamId, ok ? 1 : 0, ok ? 0 : 1);
-    } catch (e) {
-      console.error('Could not save team score (did you run supabase-schema.sql?)', e);
-    }
-
+    // Advance immediately; persist score in background to avoid UX lag.
     scheduleQuestionAdvance(qIndex);
+    void incrementMatchTeamScore(matchId, teamPick.teamId, ok ? 1 : 0, ok ? 0 : 1).catch((e) => {
+      console.error('Could not save team score (did you run supabase-schema.sql?)', e);
+      if (ok) {
+        setCorrectCount((c) => Math.max(0, c - 1));
+      } else {
+        setWrongCount((c) => Math.max(0, c - 1));
+      }
+    });
   }
 
   async function handleSkip() {
