@@ -288,7 +288,8 @@ export function subscribeMatch(id, callback) {
   };
 
   safeRun();
-  const pollMs = 1000;
+  // Keep player/admin question transitions snappy even if realtime delivery is delayed.
+  const pollMs = 100;
   const poll = setInterval(safeRun, pollMs);
 
   const channel = supabase
