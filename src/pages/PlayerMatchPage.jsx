@@ -14,6 +14,7 @@ import { Trophy, Clock, Zap, Users, CheckCircle2, XCircle, SkipForward } from 'l
 
 /** Seconds removed from countdown on skip (same magnitude as admin Skip) */
 const SKIP_SUBTRACT_SEC = 10;
+const NEXT_QUESTION_DELAY_MS = 700;
 
 function teamStorageKey(matchId) {
   return `arena_play_team_${matchId}`;
@@ -27,8 +28,10 @@ export default function PlayerMatchPage() {
   const [correctCount, setCorrectCount] = useState(0);
   const [wrongCount, setWrongCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
-  const [pickedChoice, setPickedChoice] = useState(null);
-  const [localCurrentQ, setLocalCurrentQ] = useState(null);
+  const [selectedAnswer, setSelectedAnswer] = useState(null);
+  const [isCorrect, setIsCorrect] = useState(null);
+  const [isAnswered, setIsAnswered] = useState(false);
+  const advanceTimeoutRef = useRef(null);
   const choiceLockedRef = useRef(false);
   const countdownAdvanceLockRef = useRef(false);
   const matchRef = useRef(null);
@@ -57,21 +60,27 @@ export default function PlayerMatchPage() {
 
   const teamState = teamPick?.teamId ? getMatchTeamState(match, teamPick.teamId) : null;
   const remoteCurrentQ = teamState?.currentQuestion ?? 0;
-  const currentQ = localCurrentQ ?? remoteCurrentQ;
+  const currentQ = remoteCurrentQ;
 
   useEffect(() => {
-    if (localCurrentQ == null) return;
-    if (remoteCurrentQ >= localCurrentQ) {
-      setLocalCurrentQ(null);
+    if (advanceTimeoutRef.current) {
+      clearTimeout(advanceTimeoutRef.current);
+      advanceTimeoutRef.current = null;
     }
-  }, [localCurrentQ, remoteCurrentQ]);
-
-  useEffect(() => {
     queueMicrotask(() => {
-      setPickedChoice(null);
+      setSelectedAnswer(null);
+      setIsCorrect(null);
+      setIsAnswered(false);
       choiceLockedRef.current = false;
     });
   }, [currentQ]);
+
+  useEffect(() => () => {
+    if (advanceTimeoutRef.current) {
+      clearTimeout(advanceTimeoutRef.current);
+      advanceTimeoutRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!matchId || !teamPick?.teamId) return;
@@ -124,16 +133,15 @@ export default function PlayerMatchPage() {
 
   function scheduleQuestionAdvance(qIndex) {
     if (!teamPick?.teamId) return;
-    void advanceTeamQuestionIfCurrent(matchId, teamPick.teamId, qIndex).catch((err) =>
-      console.error('Auto-advance failed', err)
-    );
-  }
-
-  function instantLocalAdvance(fromQ) {
-    const nextQ = Number(fromQ) + 1;
-    setPickedChoice(null);
-    choiceLockedRef.current = false;
-    setLocalCurrentQ(nextQ);
+    if (advanceTimeoutRef.current) {
+      clearTimeout(advanceTimeoutRef.current);
+    }
+    advanceTimeoutRef.current = setTimeout(() => {
+      advanceTimeoutRef.current = null;
+      void advanceTeamQuestionIfCurrent(matchId, teamPick.teamId, qIndex).catch((err) =>
+        console.error('Auto-advance failed', err)
+      );
+    }, NEXT_QUESTION_DELAY_MS);
   }
 
   function selectTeam(side) {
@@ -155,15 +163,17 @@ export default function PlayerMatchPage() {
 
   async function handleChoice(choiceIndex) {
     if (!teamPick?.teamId || !match || teamState?.status !== 'running') return;
-    if (pickedChoice !== null || choiceLockedRef.current) return;
+    if (isAnswered || choiceLockedRef.current) return;
     const qIndex = currentQ;
     const q = teamState?.questions?.[qIndex];
     const correctIdx = Number(q?.correctIndex);
     if (!Array.isArray(q?.choices) || q.choices.length < 2 || !Number.isFinite(correctIdx)) return;
 
     choiceLockedRef.current = true;
-    setPickedChoice(choiceIndex);
+    setSelectedAnswer(choiceIndex);
     const ok = choiceIndex === correctIdx;
+    setIsCorrect(ok);
+    setIsAnswered(true);
 
     if (ok) {
       setCorrectCount((c) => c + 1);
@@ -171,8 +181,7 @@ export default function PlayerMatchPage() {
       setWrongCount((c) => c + 1);
     }
 
-    // Advance visually right away; sync persists in background.
-    instantLocalAdvance(qIndex);
+    // Keep UI responsive: do not wait for backend writes.
     scheduleQuestionAdvance(qIndex);
     void incrementMatchTeamScore(matchId, teamPick.teamId, ok ? 1 : 0, ok ? 0 : 1).catch((e) => {
       console.error('Could not save team score (did you run supabase-schema.sql?)', e);
@@ -186,40 +195,31 @@ export default function PlayerMatchPage() {
 
   async function handleSkip() {
     if (!teamPick?.teamId || !match || teamState?.status !== 'running') return;
-    if (choiceLockedRef.current || pickedChoice !== null) return;
+    if (choiceLockedRef.current || isAnswered) return;
     const qIndex = currentQ;
     const q = teamState?.questions?.[qIndex];
     if (!q) return;
 
     choiceLockedRef.current = true;
-    setPickedChoice('SKIP');
+    setSelectedAnswer('SKIP');
+    setIsCorrect(null);
+    setIsAnswered(true);
 
-    try {
-      const ok = await applyPlayerTeamSkipPenaltyIfCurrent(
-        matchId,
-        teamPick.teamId,
-        qIndex,
-        SKIP_SUBTRACT_SEC
-      );
-      if (!ok) {
-        choiceLockedRef.current = false;
-        setPickedChoice(null);
-        return;
-      }
-      setCountdownTick((t) => t + 1);
-      setSkippedCount((s) => s + 1);
-      instantLocalAdvance(qIndex);
-      scheduleQuestionAdvance(qIndex);
-      void incrementMatchTeamSkip(matchId, teamPick.teamId, 1).catch((err) => {
-        console.error('Skip stat failed', err);
-        setSkippedCount((s) => Math.max(0, s - 1));
-      });
-    } catch (e) {
+    setCountdownTick((t) => t + 1);
+    setSkippedCount((s) => s + 1);
+    scheduleQuestionAdvance(qIndex);
+    void applyPlayerTeamSkipPenaltyIfCurrent(
+      matchId,
+      teamPick.teamId,
+      qIndex,
+      SKIP_SUBTRACT_SEC
+    ).catch((e) => {
       console.error('Skip countdown update failed', e);
-      choiceLockedRef.current = false;
-      setPickedChoice(null);
-      return;
-    }
+    });
+    void incrementMatchTeamSkip(matchId, teamPick.teamId, 1).catch((err) => {
+      console.error('Skip stat failed', err);
+      setSkippedCount((s) => Math.max(0, s - 1));
+    });
   }
 
   if (match === undefined) {
@@ -303,9 +303,9 @@ export default function PlayerMatchPage() {
     question.choices.length >= 2 &&
     Number.isFinite(correctIndexNum);
 
-  const pickedIdx = pickedChoice;
-  const showAnswerFeedback = hasMcq && typeof pickedIdx === 'number';
-  const interactionLocked = pickedChoice !== null;
+  const pickedIdx = typeof selectedAnswer === 'number' ? selectedAnswer : null;
+  const showAnswerFeedback = hasMcq && isAnswered;
+  const interactionLocked = isAnswered;
   const remainingSec = getCountdownRemainingSecForTeam(match, teamPick.teamId);
 
   return (
@@ -486,12 +486,12 @@ export default function PlayerMatchPage() {
                   في أي وقت.
                 </p>
               )}
-              {pickedChoice === 'SKIP' && (
+              {selectedAnswer === 'SKIP' && (
                 <p className="text-center text-amber-200/90 text-sm mt-4 max-w-xl mx-auto leading-relaxed">
                   تم خصم {SKIP_SUBTRACT_SEC} ثانية من الوقت المتبقي. الانتقال للسؤال التالي خلال لحظات.
                 </p>
               )}
-              {hasMcq && showAnswerFeedback && pickedIdx !== null && pickedIdx !== correctIndexNum && (
+              {hasMcq && showAnswerFeedback && (
                 <div className="mt-4 rounded-xl border border-green-800/60 bg-green-950/30 px-4 py-3 text-center">
                   <div className="text-xs text-green-400/90 mb-1">الإجابة الصحيحة</div>
                   <div className="text-green-200 font-bold text-lg">
