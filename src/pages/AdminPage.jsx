@@ -160,6 +160,30 @@ export default function AdminPage() {
         penalties: 0,
         matchNumber: nextMatchNumber,
         gameDurationMinutes: mins,
+        teamStates: {
+          [String(teamA.id)]: {
+            currentQuestion: 0,
+            questions: [],
+            status: 'pending',
+            elapsedTime: 0,
+            penalties: 0,
+            questionEndsAt: null,
+            pausedRemainingSec: null,
+            matchStartedAt: null,
+            gameDurationMinutes: mins,
+          },
+          [String(teamB.id)]: {
+            currentQuestion: 0,
+            questions: [],
+            status: 'pending',
+            elapsedTime: 0,
+            penalties: 0,
+            questionEndsAt: null,
+            pausedRemainingSec: null,
+            matchStartedAt: null,
+            gameDurationMinutes: mins,
+          },
+        },
       });
       setMatchForm({ teamAId: '', teamBId: '', gameDurationMinutes: 15 });
       await loadData();
@@ -198,13 +222,29 @@ export default function AdminPage() {
     if (questions.length === 0) return alert('No questions loaded');
     if (matches.length === 0) return alert('No matches created');
 
-    const shuffled = shuffleArray(questions);
-    const answerPool = shuffled.map((q) => q.answer);
-    const enriched = shuffled.map((q) => enrichQuestionWithMcq(q, answerPool));
     for (const m of matches) {
-      await updateMatch(m.id, { questions: enriched, currentQuestion: 0 });
+      const teamIds = [m.teamA?.id, m.teamB?.id].filter(Boolean).map((v) => String(v));
+      const teamStates = { ...(m.teamStates || {}) };
+      for (const teamId of teamIds) {
+        const shuffled = shuffleArray(questions);
+        const answerPool = shuffled.map((q) => q.answer);
+        const enriched = shuffled.map((q) => enrichQuestionWithMcq(q, answerPool));
+        teamStates[teamId] = {
+          ...(teamStates[teamId] || {}),
+          currentQuestion: 0,
+          questions: enriched,
+          status: 'pending',
+          elapsedTime: 0,
+          penalties: 0,
+          questionEndsAt: null,
+          pausedRemainingSec: null,
+          matchStartedAt: null,
+          gameDurationMinutes: m.gameDurationMinutes ?? 15,
+        };
+      }
+      await updateMatch(m.id, { teamStates, status: 'pending' });
     }
-    alert(`Copied all ${questions.length} questions to every match (${matches.length} matches)`);
+    alert(`Assigned randomized question lists per team for ${matches.length} matches.`);
     await loadData();
   }
 
@@ -221,6 +261,26 @@ export default function AdminPage() {
         pausedRemainingSec: null,
         matchStartedAt: null,
         teamSkipPenaltySec: {},
+        teamStates: Object.fromEntries(
+          [m.teamA?.id, m.teamB?.id]
+            .filter(Boolean)
+            .map((id) => [
+              String(id),
+              {
+                currentQuestion: 0,
+                questions: Array.isArray(m.teamStates?.[String(id)]?.questions)
+                  ? m.teamStates[String(id)].questions
+                  : [],
+                status: 'pending',
+                elapsedTime: 0,
+                penalties: 0,
+                questionEndsAt: null,
+                pausedRemainingSec: null,
+                matchStartedAt: null,
+                gameDurationMinutes: m.gameDurationMinutes ?? 15,
+              },
+            ])
+        ),
       });
     }
     await loadData();
@@ -477,7 +537,11 @@ export default function AdminPage() {
                   <span className="text-white font-bold">{match.teamB?.name}</span>
                 </div>
                 <div className="text-xs text-gray-500 text-center">
-                  {match.questions?.length || 0} questions · {match.gameDurationMinutes ?? 15} min game
+                  {Math.max(
+                    match.teamStates?.[String(match.teamA?.id)]?.questions?.length || 0,
+                    match.teamStates?.[String(match.teamB?.id)]?.questions?.length || 0
+                  )}{' '}
+                  questions/team · {match.gameDurationMinutes ?? 15} min game
                 </div>
                 {match.status === 'completed' && (
                   <div className="mt-3 space-y-2 text-xs">

@@ -3,13 +3,14 @@ import { Link, useParams } from 'react-router-dom';
 import {
   subscribeMatch,
   updateMatch,
-  advanceMatchQuestionIfCurrent,
-  applyMatchSkipCountdownSubtractIfCurrent,
+  advanceTeamQuestionIfCurrent,
+  applyPlayerTeamSkipPenaltyIfCurrent,
   getMatchTeamResults,
 } from '../services/supabaseService';
 import {
   formatTime,
-  getCountdownRemainingSec,
+  getCountdownRemainingSecForTeam,
+  getMatchTeamState,
   getGameDurationMinutes,
   nextQuestionEndsIso,
   wallElapsedSec,
@@ -32,6 +33,8 @@ export default function MatchPage() {
   const [currentQ, setCurrentQ] = useState(0);
   const [matchStatus, setMatchStatus] = useState('pending');
   const [showAnswer, setShowAnswer] = useState(false);
+  const [selectedTeamId, setSelectedTeamId] = useState(null);
+  const selectedTeamIdRef = useRef(null);
   const hasStartedRef = useRef(false);
   const matchRef = useRef(null);
   const countdownAdvanceLockRef = useRef(false);
@@ -39,6 +42,7 @@ export default function MatchPage() {
   const [teamResults, setTeamResults] = useState([]);
 
   matchRef.current = match;
+  selectedTeamIdRef.current = selectedTeamId;
 
   useEffect(() => {
     setMatch(undefined);
@@ -49,12 +53,24 @@ export default function MatchPage() {
     const unsub = subscribeMatch(matchId, (data) => {
       setMatch(data);
       if (data) {
-        setCurrentQ(data.currentQuestion || 0);
-        setMatchStatus(data.status || 'pending');
+        const ids = [data.teamA?.id, data.teamB?.id].filter(Boolean).map((v) => String(v));
+        setSelectedTeamId((prev) => {
+          const sticky = selectedTeamIdRef.current;
+          if (sticky && ids.includes(String(sticky))) return String(sticky);
+          if (prev && ids.includes(String(prev))) return String(prev);
+          return ids[0] || null;
+        });
       }
     });
     return unsub;
   }, [matchId]);
+
+  useEffect(() => {
+    if (!match || !selectedTeamId) return;
+    const ts = getMatchTeamState(match, selectedTeamId);
+    setCurrentQ(ts?.currentQuestion || 0);
+    setMatchStatus(ts?.status || 'pending');
+  }, [match, selectedTeamId]);
 
   const syncToFirebase = useCallback(async (updates) => {
     try {
@@ -84,25 +100,30 @@ export default function MatchPage() {
   /** Countdown hit zero → next question, no score change. */
   useEffect(() => {
     const m = matchRef.current;
-    if (!m || m.status !== 'running' || !matchId) {
+    if (!m || !selectedTeamId || !matchId) {
       countdownAdvanceLockRef.current = false;
       return;
     }
-    const q = m.currentQuestion ?? 0;
-    if (!m.questions?.[q]) return;
-    const rem = getCountdownRemainingSec(m);
+    const ts = getMatchTeamState(m, selectedTeamId);
+    if (!ts || ts.status !== 'running') {
+      countdownAdvanceLockRef.current = false;
+      return;
+    }
+    const q = ts.currentQuestion ?? 0;
+    if (!ts.questions?.[q]) return;
+    const rem = getCountdownRemainingSecForTeam(m, selectedTeamId);
     if (rem > 0.15) {
       countdownAdvanceLockRef.current = false;
       return;
     }
     if (countdownAdvanceLockRef.current) return;
     countdownAdvanceLockRef.current = true;
-    advanceMatchQuestionIfCurrent(matchId, q)
+    advanceTeamQuestionIfCurrent(matchId, selectedTeamId, q)
       .catch((e) => console.error(e))
       .finally(() => {
         countdownAdvanceLockRef.current = false;
       });
-  }, [match, matchId, countdownTick]);
+  }, [match, matchId, selectedTeamId, countdownTick]);
 
   useEffect(() => {
     if (!matchId || match?.status !== 'completed') {
@@ -128,11 +149,22 @@ export default function MatchPage() {
   const handleEndGame = useCallback(() => {
     if (!confirm('End match now for all players? No more answers or skips.')) return;
     const m = matchRef.current;
+    if (!m) return;
+    const ids = [m.teamA?.id, m.teamB?.id].filter(Boolean).map((v) => String(v));
+    const teamStates = { ...(m.teamStates || {}) };
+    for (const id of ids) {
+      const ts = getMatchTeamState(m, id);
+      teamStates[id] = {
+        ...ts,
+        status: 'completed',
+        questionEndsAt: null,
+        pausedRemainingSec: null,
+        elapsedTime: ts ? wallElapsedSec(ts) : 0,
+      };
+    }
     syncToFirebase({
       status: 'completed',
-      questionEndsAt: null,
-      pausedRemainingSec: null,
-      elapsedTime: m ? wallElapsedSec(m) : 0,
+      teamStates,
     });
     setMatchStatus('completed');
   }, [syncToFirebase]);
@@ -142,67 +174,75 @@ export default function MatchPage() {
     setShowAnswer(false);
     const m = matchRef.current;
     if (!m) return;
-
-    if (matchStatus === 'paused') {
-      const rem = getCountdownRemainingSec(m);
-      syncToFirebase({
+    const ids = [m.teamA?.id, m.teamB?.id].filter(Boolean).map((v) => String(v));
+    const nowIso = new Date().toISOString();
+    const teamStates = { ...(m.teamStates || {}) };
+    for (const id of ids) {
+      const ts = getMatchTeamState(m, id);
+      const rem =
+        ts?.status === 'paused'
+          ? Math.max(0, Number(ts?.pausedRemainingSec) || 0)
+          : getGameDurationMinutes(m) * 60;
+      const started = ts?.matchStartedAt || nowIso;
+      teamStates[id] = {
+        ...ts,
         status: 'running',
         questionEndsAt: nextQuestionEndsIso(rem),
         pausedRemainingSec: null,
-        elapsedTime: wallElapsedSec(m),
-      });
-      setMatchStatus('running');
-      return;
+        matchStartedAt: started,
+        elapsedTime: ts?.status === 'paused' ? wallElapsedSec(ts) : 0,
+      };
     }
-
-    const gameSeconds = getGameDurationMinutes(m) * 60;
-    const started = m.matchStartedAt || new Date().toISOString();
-    syncToFirebase({
-      status: 'running',
-      matchStartedAt: started,
-      questionEndsAt: nextQuestionEndsIso(gameSeconds),
-      pausedRemainingSec: null,
-      elapsedTime: 0,
-      teamSkipPenaltySec: {},
-    });
+    syncToFirebase({ teamStates, status: 'running' });
     setMatchStatus('running');
-  }, [matchStatus, syncToFirebase]);
+  }, [syncToFirebase]);
 
   const handlePause = useCallback(() => {
     const m = matchRef.current;
-    if (!m) return;
-    const rem = getCountdownRemainingSec(m);
-    syncToFirebase({
-      status: 'paused',
-      pausedRemainingSec: rem,
-      questionEndsAt: null,
-      elapsedTime: wallElapsedSec(m),
-    });
+    if (!m || !selectedTeamId) return;
+    const ts = getMatchTeamState(m, selectedTeamId);
+    if (!ts) return;
+    const rem = getCountdownRemainingSecForTeam(m, selectedTeamId);
+    const teamStates = {
+      ...(m.teamStates || {}),
+      [String(selectedTeamId)]: {
+        ...ts,
+        status: 'paused',
+        pausedRemainingSec: rem,
+        questionEndsAt: null,
+        elapsedTime: wallElapsedSec(ts),
+      },
+    };
+    syncToFirebase({ teamStates });
     setMatchStatus('paused');
-  }, [syncToFirebase]);
+  }, [selectedTeamId, syncToFirebase]);
 
   const handleCorrect = useCallback(async () => {
-    if (!match?.questions?.length) return;
+    if (!selectedTeamId) return;
+    const ts = getMatchTeamState(match, selectedTeamId);
+    if (!ts?.questions?.length) return;
     try {
       correctSound?.play();
     } catch {
       /* ignore */
     }
     setShowAnswer(false);
-    await advanceMatchQuestionIfCurrent(matchId, currentQ);
-  }, [match, currentQ, matchId]);
+    await advanceTeamQuestionIfCurrent(matchId, selectedTeamId, currentQ);
+  }, [match, currentQ, matchId, selectedTeamId]);
 
   const handleSkip = useCallback(async () => {
-    if (!match?.questions?.length) return;
+    if (!selectedTeamId) return;
+    const ts = getMatchTeamState(match, selectedTeamId);
+    if (!ts?.questions?.length) return;
     try {
       skipSound?.play();
     } catch {
       /* ignore */
     }
     setShowAnswer(false);
-    await applyMatchSkipCountdownSubtractIfCurrent(matchId, currentQ, SKIP_SUBTRACT_SEC);
-    await advanceMatchQuestionIfCurrent(matchId, currentQ);
-  }, [match, currentQ, matchId]);
+    await applyPlayerTeamSkipPenaltyIfCurrent(matchId, selectedTeamId, currentQ, SKIP_SUBTRACT_SEC);
+    await advanceTeamQuestionIfCurrent(matchId, selectedTeamId, currentQ);
+  }, [match, currentQ, matchId, selectedTeamId]);
 
   const handleReset = useCallback(() => {
     if (!confirm('Reset this match?')) return;
@@ -210,15 +250,26 @@ export default function MatchPage() {
     setCurrentQ(0);
     setMatchStatus('pending');
     setShowAnswer(false);
+    const m = matchRef.current;
+    if (!m) return;
+    const teamStates = { ...(m.teamStates || {}) };
+    const ids = [m.teamA?.id, m.teamB?.id].filter(Boolean).map((v) => String(v));
+    for (const id of ids) {
+      const prev = getMatchTeamState(m, id);
+      teamStates[id] = {
+        ...prev,
+        currentQuestion: 0,
+        status: 'pending',
+        elapsedTime: 0,
+        penalties: 0,
+        questionEndsAt: null,
+        pausedRemainingSec: null,
+        matchStartedAt: null,
+      };
+    }
     syncToFirebase({
-      currentQuestion: 0,
-      elapsedTime: 0,
-      penalties: 0,
       status: 'pending',
-      questionEndsAt: null,
-      pausedRemainingSec: null,
-      matchStartedAt: null,
-      teamSkipPenaltySec: {},
+      teamStates,
     });
   }, [syncToFirebase]);
 
@@ -241,14 +292,17 @@ export default function MatchPage() {
     );
   }
 
-  const questions = match.questions || [];
+  const currentTeamState = selectedTeamId ? getMatchTeamState(match, selectedTeamId) : null;
+  const questions = currentTeamState?.questions || [];
   const question = questions[currentQ];
-  const isCompleted = matchStatus === 'completed';
+  const isCompleted = matchStatus === 'completed' || match.status === 'completed';
   const isRunning = matchStatus === 'running';
   const isPending = matchStatus === 'pending';
   const isPaused = matchStatus === 'paused';
 
-  const remainingSec = getCountdownRemainingSec(match);
+  const remainingSec = selectedTeamId
+    ? getCountdownRemainingSecForTeam(match, selectedTeamId)
+    : 0;
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
@@ -270,6 +324,11 @@ export default function MatchPage() {
             <span className="text-xs text-gray-500">
               {getGameDurationMinutes(match)} min game
             </span>
+            {selectedTeamId && (
+              <span className="text-xs text-indigo-300 bg-indigo-900/40 px-2 py-1 rounded">
+                Team scope: {selectedTeamId === String(match.teamA?.id) ? match.teamA?.name : match.teamB?.name}
+              </span>
+            )}
           </div>
           <button
             onClick={handleReset}
@@ -297,6 +356,30 @@ export default function MatchPage() {
             </div>
           </div>
         </div>
+        <div className="max-w-4xl mx-auto mt-4 flex items-center justify-center gap-2">
+          {[match.teamA, match.teamB].filter(Boolean).map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                const id = String(t.id);
+                selectedTeamIdRef.current = id;
+                setSelectedTeamId(id);
+                const ts = getMatchTeamState(matchRef.current, id);
+                setCurrentQ(ts?.currentQuestion || 0);
+                setMatchStatus(ts?.status || 'pending');
+                setShowAnswer(false);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+                String(selectedTeamId) === String(t.id)
+                  ? 'bg-indigo-600 border-indigo-500 text-white'
+                  : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              Control {t.name}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Main content */}
@@ -304,6 +387,7 @@ export default function MatchPage() {
         {/* Countdown */}
         <div className="text-center">
           <div className="text-gray-500 text-xs mb-1 uppercase tracking-wide">Time left (whole game)</div>
+          <div className="text-gray-600 text-[11px] mb-2 uppercase tracking-wide">selected team timer</div>
           <TimerDisplay
             seconds={isCompleted ? 0 : remainingSec}
             isRunning={isRunning}
@@ -317,7 +401,7 @@ export default function MatchPage() {
             <Trophy className="mx-auto mb-4 text-yellow-400" size={48} />
             <h2 className="text-2xl font-bold text-green-400 mb-2 text-center">Match Complete!</h2>
             <p className="text-4xl font-mono font-bold text-white mb-2 text-center">
-              {formatTime(wallElapsedSec(match))}
+              {formatTime(wallElapsedSec(currentTeamState || match))}
             </p>
             <p className="text-gray-400 text-center mb-6">
               {questions.length} questions · total time
@@ -410,7 +494,7 @@ export default function MatchPage() {
                 disabled={!questions.length}
                 className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed px-8 py-4 rounded-xl text-lg font-bold transition-colors flex items-center gap-2"
               >
-                <Play size={22} /> START
+                <Play size={22} /> START (ALL TEAMS)
               </button>
             )}
 
@@ -445,7 +529,7 @@ export default function MatchPage() {
                   onClick={handleEndGame}
                   className="bg-rose-800 hover:bg-rose-900 px-6 py-4 rounded-xl text-lg font-bold transition-colors flex items-center gap-2 border border-rose-600"
                 >
-                  <StopCircle size={22} /> End game
+                  <StopCircle size={22} /> End game (ALL)
                 </button>
               </>
             )}
@@ -456,14 +540,14 @@ export default function MatchPage() {
                   onClick={handleStart}
                   className="bg-green-600 hover:bg-green-700 px-8 py-4 rounded-xl text-lg font-bold transition-colors flex items-center gap-2"
                 >
-                  <Play size={22} /> Resume
+                  <Play size={22} /> Resume (ALL TEAMS)
                 </button>
                 <button
                   type="button"
                   onClick={handleEndGame}
                   className="bg-rose-800 hover:bg-rose-900 px-6 py-4 rounded-xl text-lg font-bold transition-colors flex items-center gap-2 border border-rose-600"
                 >
-                  <StopCircle size={22} /> End game
+                  <StopCircle size={22} /> End game (ALL)
                 </button>
               </>
             )}

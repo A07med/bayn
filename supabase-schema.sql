@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS matches (
   question_ends_at TIMESTAMPTZ,
   paused_remaining_sec DOUBLE PRECISION,
   match_started_at TIMESTAMPTZ,
+  team_states JSONB DEFAULT '{}',
   team_skip_penalty_sec JSONB DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -33,6 +34,7 @@ ALTER TABLE matches ADD COLUMN IF NOT EXISTS time_per_question INT DEFAULT 30;
 ALTER TABLE matches ADD COLUMN IF NOT EXISTS question_ends_at TIMESTAMPTZ;
 ALTER TABLE matches ADD COLUMN IF NOT EXISTS paused_remaining_sec DOUBLE PRECISION;
 ALTER TABLE matches ADD COLUMN IF NOT EXISTS match_started_at TIMESTAMPTZ;
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS team_states JSONB DEFAULT '{}';
 ALTER TABLE matches ADD COLUMN IF NOT EXISTS game_duration_minutes INT DEFAULT 15;
 ALTER TABLE matches ADD COLUMN IF NOT EXISTS team_skip_penalty_sec JSONB DEFAULT '{}';
 

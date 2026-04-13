@@ -93,8 +93,64 @@ async function withMatchesRowFallback(row, run) {
   throw new Error('matches: too many schema fallbacks');
 }
 
+function getTeamIdList(match) {
+  const ids = [match?.teamA?.id, match?.teamB?.id]
+    .map((v) => (v == null ? null : String(v)))
+    .filter(Boolean);
+  return Array.from(new Set(ids));
+}
+
+function buildDefaultTeamState(match) {
+  return {
+    currentQuestion: Number(match?.currentQuestion) || 0,
+    questions: Array.isArray(match?.questions) ? match.questions : [],
+    status: match?.status || 'pending',
+    elapsedTime: Number(match?.elapsedTime) || 0,
+    penalties: Number(match?.penalties) || 0,
+    questionEndsAt: match?.questionEndsAt ?? null,
+    pausedRemainingSec: match?.pausedRemainingSec ?? null,
+    matchStartedAt: match?.matchStartedAt ?? null,
+  };
+}
+
+function getTeamState(match, teamId) {
+  if (!match || !teamId) return null;
+  const key = String(teamId);
+  const map = match.teamStates && typeof match.teamStates === 'object' ? match.teamStates : null;
+  if (map && map[key]) return map[key];
+  return buildDefaultTeamState(match);
+}
+
+function withUpdatedTeamState(match, teamId, teamStatePatch) {
+  const key = String(teamId);
+  const prev = getTeamState(match, teamId) || buildDefaultTeamState(match);
+  const existingMap = match.teamStates && typeof match.teamStates === 'object' ? match.teamStates : {};
+  return {
+    ...existingMap,
+    [key]: { ...prev, ...teamStatePatch },
+  };
+}
+
 export async function createMatch(match) {
-  const row = denormalizeMatch(match);
+  const durationMin = getGameDurationMinutes(match);
+  const teamIds = [match?.teamA?.id, match?.teamB?.id].filter(Boolean);
+  const existingStates = match?.teamStates && typeof match.teamStates === 'object' ? match.teamStates : {};
+  const initialized = { ...existingStates };
+  for (const id of teamIds) {
+    const k = String(id);
+    initialized[k] = {
+      currentQuestion: 0,
+      questions: Array.isArray(initialized[k]?.questions) ? initialized[k].questions : [],
+      status: 'pending',
+      elapsedTime: 0,
+      penalties: 0,
+      questionEndsAt: null,
+      pausedRemainingSec: null,
+      matchStartedAt: null,
+      gameDurationMinutes: durationMin,
+    };
+  }
+  const row = denormalizeMatch({ ...match, teamStates: initialized });
   return withMatchesRowFallback(row, async (r) => {
     const { data, error } = await supabase.from('matches').insert(r).select().single();
     if (error) throw error;
@@ -116,31 +172,49 @@ export async function updateMatch(id, updates) {
  */
 export async function advanceMatchQuestionIfCurrent(matchId, answeredAtIndex) {
   const match = await getMatch(matchId);
-  if (!match || match.status !== 'running') return false;
-  const cq = Number(match.currentQuestion) || 0;
+  if (!match) return false;
+  const fallbackTeamId = getTeamIdList(match)[0];
+  if (!fallbackTeamId) return false;
+  return advanceTeamQuestionIfCurrent(matchId, fallbackTeamId, answeredAtIndex);
+}
+
+export async function advanceTeamQuestionIfCurrent(matchId, teamId, answeredAtIndex) {
+  const match = await getMatch(matchId);
+  if (!match || !teamId) return false;
+  const state = getTeamState(match, teamId);
+  if (!state || state.status !== 'running') return false;
+  const cq = Number(state.currentQuestion) || 0;
   if (cq !== answeredAtIndex) return false;
 
-  const questions = match.questions || [];
+  const questions = Array.isArray(state.questions) ? state.questions : [];
   const nextQ = answeredAtIndex + 1;
-  const elapsed = wallElapsedSec(match);
-  const penalties = match.penalties ?? 0;
+  const elapsed = wallElapsedSec(state);
+  const penalties = state.penalties ?? 0;
 
-  if (nextQ >= questions.length) {
-    await updateMatch(matchId, {
-      currentQuestion: nextQ,
-      status: 'completed',
-      elapsedTime: elapsed,
-      penalties,
-      questionEndsAt: null,
-      pausedRemainingSec: null,
-    });
-  } else {
-    await updateMatch(matchId, {
-      currentQuestion: nextQ,
-      elapsedTime: elapsed,
-      penalties,
-    });
-  }
+  const teamStates =
+    nextQ >= questions.length
+      ? withUpdatedTeamState(match, teamId, {
+          currentQuestion: nextQ,
+          status: 'completed',
+          elapsedTime: elapsed,
+          penalties,
+          questionEndsAt: null,
+          pausedRemainingSec: null,
+        })
+      : withUpdatedTeamState(match, teamId, {
+          currentQuestion: nextQ,
+          elapsedTime: elapsed,
+          penalties,
+        });
+
+  const allIds = getTeamIdList(match);
+  const allDone =
+    allIds.length > 0 &&
+    allIds.every((id) => (teamStates[String(id)]?.status || 'pending') === 'completed');
+  await updateMatch(matchId, {
+    teamStates,
+    ...(allDone ? { status: 'completed' } : {}),
+  });
   return true;
 }
 
@@ -173,19 +247,25 @@ export async function applyMatchSkipCountdownSubtractIfCurrent(matchId, question
  */
 export async function applyPlayerTeamSkipPenaltyIfCurrent(matchId, teamId, questionIndex, subtractSeconds) {
   const match = await getMatch(matchId);
-  if (!match || match.status !== 'running') return false;
-  const cq = Number(match.currentQuestion) || 0;
+  if (!match || !teamId) return false;
+  const state = getTeamState(match, teamId);
+  if (!state || state.status !== 'running') return false;
+  const cq = Number(state.currentQuestion) || 0;
   if (cq !== questionIndex) return false;
   const sub = Math.max(0, Number(subtractSeconds) || 0);
   if (!sub) return true;
-  if (!teamId) return false;
-
-  const prev = { ...(match.teamSkipPenaltySec && typeof match.teamSkipPenaltySec === 'object' ? match.teamSkipPenaltySec : {}) };
-  const key = String(teamId);
-  prev[key] = Math.max(0, Number(prev[key]) || 0) + sub;
-
+  const now = Date.now();
+  const endMs = parseIsoToMs(state.questionEndsAt);
+  const fullGameSec =
+    (Number(state.gameDurationMinutes) || getGameDurationMinutes(match)) * 60;
+  const remaining =
+    endMs == null ? fullGameSec : Math.max(0, (endMs - now) / 1000);
+  const newRem = Math.max(0, remaining - sub);
+  const teamStates = withUpdatedTeamState(match, teamId, {
+    questionEndsAt: nextQuestionEndsIso(newRem),
+  });
   await updateMatch(matchId, {
-    teamSkipPenaltySec: prev,
+    teamStates,
   });
   return true;
 }
@@ -307,7 +387,8 @@ export async function incrementMatchTeamScore(matchId, teamId, deltaCorrect = 0,
   if (!deltaCorrect && !deltaWrong) return;
 
   const match = await getMatch(matchId);
-  if (!match || match.status !== 'running') return;
+  const ts = getTeamState(match, teamId);
+  if (!match || !ts || ts.status !== 'running') return;
 
   const { data: row, error: fetchErr } = await supabase
     .from('match_team_results')
@@ -340,7 +421,8 @@ export async function incrementMatchTeamSkip(matchId, teamId, deltaSkip = 1) {
   if (!matchId || !teamId || !deltaSkip) return;
 
   const match = await getMatch(matchId);
-  if (!match || match.status !== 'running') return;
+  const ts = getTeamState(match, teamId);
+  if (!match || !ts || ts.status !== 'running') return;
 
   const { data: row, error: fetchErr } = await supabase
     .from('match_team_results')
@@ -395,7 +477,7 @@ export function subscribeAllMatchTeamResults(callback) {
 // ── Helpers to map between app format and DB columns ──
 
 function normalizeMatch(row) {
-  return {
+  const normalized = {
     id: row.id,
     teamA: row.team_a,
     teamB: row.team_b,
@@ -413,7 +495,19 @@ function normalizeMatch(row) {
       row.team_skip_penalty_sec && typeof row.team_skip_penalty_sec === 'object'
         ? row.team_skip_penalty_sec
         : {},
+    teamStates:
+      row.team_states && typeof row.team_states === 'object'
+        ? row.team_states
+        : {},
   };
+  const ids = [normalized.teamA?.id, normalized.teamB?.id].filter(Boolean);
+  if (ids.length && (!normalized.teamStates || Object.keys(normalized.teamStates).length === 0)) {
+    const fallback = buildDefaultTeamState(normalized);
+    const map = {};
+    for (const id of ids) map[String(id)] = { ...fallback };
+    normalized.teamStates = map;
+  }
+  return normalized;
 }
 
 function denormalizeMatch(obj) {
@@ -431,6 +525,7 @@ function denormalizeMatch(obj) {
   if (obj.pausedRemainingSec !== undefined) row.paused_remaining_sec = obj.pausedRemainingSec;
   if (obj.matchStartedAt !== undefined) row.match_started_at = obj.matchStartedAt;
   if (obj.teamSkipPenaltySec !== undefined) row.team_skip_penalty_sec = obj.teamSkipPenaltySec;
+  if (obj.teamStates !== undefined) row.team_states = obj.teamStates;
   return row;
 }
 

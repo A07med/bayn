@@ -107,22 +107,41 @@ export function getCountdownRemainingSec(match, nowMs = Date.now()) {
   return Math.max(0, (endMs - nowMs) / 1000);
 }
 
-/**
- * Per-team timer adjustment (player skips only). Persisted as `match.teamSkipPenaltySec` in DB.
- * Conceptually: `teamTimers[teamId].effectiveDurationSec -= penaltySec` vs the shared baseline —
- * we store cumulative penalty seconds so remainingForTeam = sharedRemaining − penalty.
- * Shared `question_ends_at` is never mutated by player skip (admin skip still updates it globally).
- */
-export function getTeamSkipPenaltySec(match, teamId) {
-  if (!teamId || !match?.teamSkipPenaltySec || typeof match.teamSkipPenaltySec !== 'object') return 0;
+/** Per-team state accessor with backward-compatible fallback for legacy rows. */
+export function getMatchTeamState(match, teamId) {
+  if (!match || !teamId) return null;
   const key = String(teamId);
-  const m = match.teamSkipPenaltySec;
-  const v = m[key] ?? m[teamId];
-  return Math.max(0, Number(v) || 0);
+  const fromMap =
+    match.teamStates && typeof match.teamStates === 'object'
+      ? (match.teamStates[key] ?? match.teamStates[teamId])
+      : null;
+  if (fromMap) return fromMap;
+  return {
+    currentQuestion: match.currentQuestion ?? 0,
+    questions: Array.isArray(match.questions) ? match.questions : [],
+    status: match.status || 'pending',
+    questionEndsAt: match.questionEndsAt ?? null,
+    pausedRemainingSec: match.pausedRemainingSec ?? null,
+    matchStartedAt: match.matchStartedAt ?? null,
+    elapsedTime: match.elapsedTime ?? 0,
+    penalties: match.penalties ?? 0,
+  };
 }
 
-/** Remaining time for this team’s display only; other teams use their own penalty map entries. */
+/** Remaining seconds for one team's independent timer state. */
 export function getCountdownRemainingSecForTeam(match, teamId, nowMs = Date.now()) {
-  const base = getCountdownRemainingSec(match, nowMs);
-  return Math.max(0, base - getTeamSkipPenaltySec(match, teamId));
+  const ts = getMatchTeamState(match, teamId);
+  if (!ts) return 0;
+  if (ts.status === 'paused') {
+    const r = Number(ts.pausedRemainingSec);
+    return Math.max(0, Number.isFinite(r) ? r : 0);
+  }
+  if (ts.status !== 'running') {
+    return getGameDurationMinutes(match) * 60;
+  }
+  const endMs = parseIsoToMs(ts.questionEndsAt);
+  if (endMs == null) {
+    return getGameDurationMinutes(match) * 60;
+  }
+  return Math.max(0, (endMs - nowMs) / 1000);
 }

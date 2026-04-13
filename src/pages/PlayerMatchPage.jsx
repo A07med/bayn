@@ -5,10 +5,10 @@ import {
   incrementMatchTeamScore,
   incrementMatchTeamSkip,
   getMatchTeamResults,
-  advanceMatchQuestionIfCurrent,
+  advanceTeamQuestionIfCurrent,
   applyPlayerTeamSkipPenaltyIfCurrent,
 } from '../services/supabaseService';
-import { formatTime, getCountdownRemainingSec, getCountdownRemainingSecForTeam, wallElapsedSec } from '../utils';
+import { formatTime, getCountdownRemainingSecForTeam, getMatchTeamState, wallElapsedSec } from '../utils';
 import { Trophy, Clock, Zap, Users, CheckCircle2, XCircle, SkipForward } from 'lucide-react';
 
 /** Seconds removed from countdown on skip (same magnitude as admin Skip) */
@@ -53,7 +53,8 @@ export default function PlayerMatchPage() {
     return unsub;
   }, [matchId]);
 
-  const currentQ = match?.currentQuestion ?? 0;
+  const teamState = teamPick?.teamId ? getMatchTeamState(match, teamPick.teamId) : null;
+  const currentQ = teamState?.currentQuestion ?? 0;
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -79,36 +80,43 @@ export default function PlayerMatchPage() {
   const [countdownTick, setCountdownTick] = useState(0);
 
   useEffect(() => {
-    if (match?.status !== 'running' && match?.status !== 'paused') return;
+    const s = teamState?.status;
+    if (s !== 'running' && s !== 'paused') return;
     const id = setInterval(() => setCountdownTick((t) => t + 1), 100);
     return () => clearInterval(id);
-  }, [match?.status]);
+  }, [teamState?.status]);
 
   /** Countdown → 0: next question, no score (unanswered). */
   useEffect(() => {
     const m = matchRef.current;
-    if (!m || m.status !== 'running' || !matchId) {
+    if (!m || !teamPick?.teamId || !matchId) {
       countdownAdvanceLockRef.current = false;
       return;
     }
-    const q = m.currentQuestion ?? 0;
-    if (!m.questions?.[q]) return;
-    const rem = getCountdownRemainingSec(m);
+    const ts = getMatchTeamState(m, teamPick.teamId);
+    if (!ts || ts.status !== 'running') {
+      countdownAdvanceLockRef.current = false;
+      return;
+    }
+    const q = ts.currentQuestion ?? 0;
+    if (!ts.questions?.[q]) return;
+    const rem = getCountdownRemainingSecForTeam(m, teamPick.teamId);
     if (rem > 0.15) {
       countdownAdvanceLockRef.current = false;
       return;
     }
     if (countdownAdvanceLockRef.current) return;
     countdownAdvanceLockRef.current = true;
-    advanceMatchQuestionIfCurrent(matchId, q)
+    advanceTeamQuestionIfCurrent(matchId, teamPick.teamId, q)
       .catch((e) => console.error(e))
       .finally(() => {
         countdownAdvanceLockRef.current = false;
       });
-  }, [match, matchId, match?.currentQuestion, match?.questionEndsAt, match?.status, countdownTick]);
+  }, [match, matchId, teamPick?.teamId, teamState?.currentQuestion, teamState?.questionEndsAt, teamState?.status, countdownTick]);
 
   function scheduleQuestionAdvance(qIndex) {
-    void advanceMatchQuestionIfCurrent(matchId, qIndex).catch((err) =>
+    if (!teamPick?.teamId) return;
+    void advanceTeamQuestionIfCurrent(matchId, teamPick.teamId, qIndex).catch((err) =>
       console.error('Auto-advance failed', err)
     );
   }
@@ -131,10 +139,10 @@ export default function PlayerMatchPage() {
   }
 
   async function handleChoice(choiceIndex) {
-    if (!teamPick?.teamId || !match || match.status !== 'running') return;
+    if (!teamPick?.teamId || !match || teamState?.status !== 'running') return;
     if (pickedChoice !== null || choiceLockedRef.current) return;
     const qIndex = currentQ;
-    const q = match.questions?.[qIndex];
+    const q = teamState?.questions?.[qIndex];
     const correctIdx = Number(q?.correctIndex);
     if (!Array.isArray(q?.choices) || q.choices.length < 2 || !Number.isFinite(correctIdx)) return;
 
@@ -158,10 +166,10 @@ export default function PlayerMatchPage() {
   }
 
   async function handleSkip() {
-    if (!teamPick?.teamId || !match || match.status !== 'running') return;
+    if (!teamPick?.teamId || !match || teamState?.status !== 'running') return;
     if (choiceLockedRef.current || pickedChoice !== null) return;
     const qIndex = currentQ;
-    const q = match.questions?.[qIndex];
+    const q = teamState?.questions?.[qIndex];
     if (!q) return;
 
     choiceLockedRef.current = true;
@@ -257,12 +265,12 @@ export default function PlayerMatchPage() {
     );
   }
 
-  const questions = match.questions || [];
+  const questions = teamState?.questions || [];
   const question = questions[currentQ];
-  const isCompleted = match.status === 'completed';
-  const isRunning = match.status === 'running';
-  const isPending = match.status === 'pending' || !match.status;
-  const isPaused = match.status === 'paused';
+  const isCompleted = teamState?.status === 'completed' || match.status === 'completed';
+  const isRunning = teamState?.status === 'running';
+  const isPending = (teamState?.status || 'pending') === 'pending';
+  const isPaused = teamState?.status === 'paused';
   const progress = questions.length ? Math.min((currentQ / questions.length) * 100, 100) : 0;
 
   const correctIndexNum =
@@ -485,7 +493,7 @@ export default function PlayerMatchPage() {
             <h2 className="text-3xl md:text-5xl font-black text-green-400">انتهت المباراة!</h2>
             <div className="text-gray-500 text-sm mb-1">مدة المباراة</div>
             <div className="text-5xl md:text-8xl font-mono font-black text-white timer-display">
-              {formatTime(wallElapsedSec(match))}
+              {formatTime(wallElapsedSec(teamState || match))}
             </div>
             <div className="flex flex-wrap items-center justify-center gap-4 text-lg">
               <span className="text-green-400 font-bold">صح: {correctCount}</span>
